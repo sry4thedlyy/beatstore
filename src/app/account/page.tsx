@@ -3,6 +3,8 @@ import { requireUser } from "@/server/auth/session";
 import { getAccountCounts, getAdminOverview } from "@/server/account";
 import { SignOutButton } from "@/components/account-nav";
 import { Icon } from "@/components/icons";
+import { getAdminCatalog } from "@/server/catalog/admin";
+import { statusNames, STORAGE_LIMIT } from "@/domain/catalog-editor";
 
 export const metadata = { title: "Личный кабинет" };
 export default async function AccountPage() {
@@ -11,6 +13,7 @@ export default async function AccountPage() {
   const counts = admin
     ? await getAdminOverview(user)
     : await getAccountCounts(user);
+  const catalog = admin ? await getAdminCatalog(user) : null;
   return (
     <div className="account-page">
       <Link href="/" className="back-link">
@@ -39,6 +42,9 @@ export default async function AccountPage() {
         <section className="account-section" aria-labelledby="admin-title">
           <div className="section-heading">
             <h2 id="admin-title">Каталог магазина</h2>
+            <Link href="/products/new" className="primary-button">
+              Добавить товар
+            </Link>
           </div>
           <div className="account-stats">
             <div>
@@ -53,6 +59,43 @@ export default async function AccountPage() {
           <Link href="/" className="text-link">
             Открыть каталог <Icon name="arrow" />
           </Link>
+          {catalog && (
+            <>
+              <p className="storage-summary">
+                Файлы и сохраняемые версии:{" "}
+                {(catalog.usedBytes / 1024 / 1024).toFixed(1)} МБ из{" "}
+                {STORAGE_LIMIT / 1024 / 1024} МБ.
+              </p>
+              <div className="admin-catalog">
+                {catalog.products.length ? (
+                  catalog.products.map((product) => (
+                    <Link
+                      key={product.id}
+                      href={`/products/${product.id}`}
+                      className="admin-product-row"
+                    >
+                      <div>
+                        <strong>{product.title}</strong>
+                        <span>
+                          {product.type === "BEAT" ? "Бит" : "Драмкит"}
+                        </span>
+                      </div>
+                      <span
+                        className={`status-badge status-${product.status.toLowerCase()}`}
+                      >
+                        {statusNames[product.status]}
+                      </span>
+                      <Icon name="arrow" />
+                    </Link>
+                  ))
+                ) : (
+                  <p className="account-description">
+                    В каталоге пока нет товаров. Создай первый черновик.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </section>
       ) : (
         <>

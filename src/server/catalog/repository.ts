@@ -18,6 +18,7 @@ export interface Product {
   projectRequirements: string | null;
   discount: string;
   offers: Offer[];
+  mediaBase?: string;
 }
 
 export interface Offer {

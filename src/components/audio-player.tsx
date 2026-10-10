@@ -15,6 +15,7 @@ interface Track {
   title: string;
   thumbnailId: string;
   previewId: string;
+  mediaBase?: string;
 }
 interface PlayerContext {
   currentId?: string;
@@ -31,6 +32,7 @@ export function timeLabel(seconds: number): string {
 export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const audio = useRef<HTMLAudioElement>(null);
   const activeId = useRef<string | undefined>(undefined);
+  const activeSource = useRef<string | undefined>(undefined);
   const [track, setTrack] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
@@ -41,13 +43,17 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     const element = audio.current;
     if (!element) return;
     setError("");
-    if (activeId.current === next.id && !element.paused) {
+    const source = `${next.mediaBase ?? "/media"}/${next.previewId}`;
+    const sameTrack =
+      activeId.current === next.id && activeSource.current === source;
+    if (sameTrack && !element.paused) {
       element.pause();
       return;
     }
-    if (activeId.current !== next.id) {
+    if (!sameTrack) {
       activeId.current = next.id;
-      element.src = `/media/${next.previewId}`;
+      activeSource.current = source;
+      element.src = source;
       setTrack(next);
       setPosition(0);
       setDuration(0);
@@ -65,6 +71,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     audio.current?.removeAttribute("src");
     audio.current?.load();
     activeId.current = undefined;
+    activeSource.current = undefined;
     setTrack(null);
     setPlaying(false);
     setPosition(0);
@@ -93,13 +100,15 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       {track && (
         <aside className="player" aria-label="Аудиоплеер">
           <div className="player-track">
-            <Image
-              src={`/media/${track.thumbnailId}`}
-              alt=""
-              width={48}
-              height={48}
-              unoptimized
-            />
+            {track.thumbnailId && (
+              <Image
+                src={`${track.mediaBase ?? "/media"}/${track.thumbnailId}`}
+                alt=""
+                width={48}
+                height={48}
+                unoptimized
+              />
+            )}
             <div>
               <strong>{track.title}</strong>
               <span>Аудиопревью</span>

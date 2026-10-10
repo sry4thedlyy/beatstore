@@ -17,6 +17,13 @@ export function safeReturnTo(value: unknown): string {
     if (url.pathname === "/" || url.pathname === "/account")
       return url.pathname;
     if (
+      url.pathname === "/products/new" ||
+      /^\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i.test(
+        url.pathname,
+      )
+    )
+      return url.pathname;
+    if (
       !/^\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         url.pathname,
       )

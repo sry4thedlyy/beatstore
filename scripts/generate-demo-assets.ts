@@ -83,7 +83,7 @@ function wav(samples: Int16Array): Buffer {
 }
 
 // Store-only ZIP: small deterministic fixtures, no archive library needed.
-function zip(entries: { name: string; data: Buffer }[]): Buffer {
+export function zip(entries: { name: string; data: Buffer }[]): Buffer {
   function crc32(bytes: Buffer) {
     let crc = 0xffffffff;
     for (const byte of bytes) {

@@ -1,8 +1,12 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
 import path from "node:path";
 import { getDatabase, type Database } from "./db/connection";
+import type { CurrentUser } from "./auth/session";
+import { assertAdministrator } from "./catalog/admin";
 
-interface MediaFile {
+export interface MediaFile {
   id: string;
   bucket: string;
   object_key: string;
@@ -18,21 +22,87 @@ export async function getPublicMedia(
   const db = connection ?? (await getDatabase());
   const { rows } = await db.query<MediaFile>(
     `SELECT f.id, f.bucket, f.object_key, f.content_type, f.size_bytes, f.checksum FROM files f
-    WHERE f.id = $1 AND f.status = 'READY' AND EXISTS (SELECT 1 FROM products p
+    WHERE f.id = $1 AND f.status = 'READY' AND f.kind IN ('COVER','THUMBNAIL','PREVIEW','MP3')
+      AND f.content_type IN ('image/jpeg','image/png','image/webp','audio/mpeg') AND EXISTS (SELECT 1 FROM products p
       WHERE p.status = 'PUBLISHED' AND (p.cover_file_id = f.id OR p.thumbnail_file_id = f.id OR p.preview_file_id = f.id))`,
     [id],
   );
   return rows[0] ?? null;
 }
 
-export async function readLocalMedia(file: MediaFile): Promise<Buffer> {
-  if (file.bucket !== "local-demo")
+export function localMediaPath(file: MediaFile): string {
+  if (!["local-demo", "local-upload"].includes(file.bucket))
     throw new Error("Storage provider is not configured for this file");
-  const root = path.resolve(".data/demo-assets");
+  const root = path.resolve(
+    /*turbopackIgnore: true*/ file.bucket === "local-demo"
+      ? ".data/demo-assets"
+      : ".data/uploads",
+  );
   const filename = path.resolve(root, file.object_key);
   if (!filename.startsWith(root + path.sep))
     throw new Error("Invalid object key");
-  return readFile(filename);
+  return filename;
+}
+export async function readLocalMedia(file: MediaFile): Promise<Buffer> {
+  return readFile(localMediaPath(file));
+}
+export async function getAdminMedia(
+  user: CurrentUser,
+  id: string,
+  connection?: Database,
+): Promise<MediaFile | null> {
+  const db = connection ?? (await getDatabase());
+  await assertAdministrator(user, db);
+  const { rows } = await db.query<MediaFile>(
+    `SELECT f.id,f.bucket,f.object_key,f.content_type,f.size_bytes,f.checksum FROM files f
+    WHERE f.id=$1 AND f.status='READY' AND f.kind IN ('COVER','THUMBNAIL','PREVIEW','MP3') AND EXISTS
+    (SELECT 1 FROM products p WHERE p.cover_file_id=f.id OR p.thumbnail_file_id=f.id OR p.preview_file_id=f.id)`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+export async function mediaResponse(
+  request: Request,
+  file: MediaFile,
+  head = false,
+  privateMedia = false,
+): Promise<Response> {
+  let filename: string;
+  const size = Number(file.size_bytes);
+  try {
+    filename = localMediaPath(file);
+    if ((await stat(filename)).size !== size)
+      throw new Error("Incomplete file");
+  } catch {
+    return new Response(null, { status: 404 });
+  }
+  const headers = new Headers({
+    "Content-Type": file.content_type,
+    "Accept-Ranges": "bytes",
+    "Cache-Control": privateMedia ? "private, no-store" : "no-cache",
+    "X-Content-Type-Options": "nosniff",
+    ETag: `"${file.checksum}"`,
+  });
+  if (request.headers.get("if-none-match") === headers.get("ETag"))
+    return new Response(null, { status: 304, headers });
+  const rangeHeader = head ? null : request.headers.get("range");
+  const range = rangeHeader ? parseRange(rangeHeader, size) : null;
+  if (rangeHeader && !range) {
+    headers.set("Content-Range", `bytes */${size}`);
+    return new Response(null, { status: 416, headers });
+  }
+  headers.set(
+    "Content-Length",
+    String(range ? range.end - range.start + 1 : size),
+  );
+  if (range)
+    headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
+  const stream = head
+    ? null
+    : (Readable.toWeb(
+        createReadStream(filename, range ?? undefined),
+      ) as ReadableStream<Uint8Array>);
+  return new Response(stream, { status: range ? 206 : 200, headers });
 }
 
 export function parseRange(

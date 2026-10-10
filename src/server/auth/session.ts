@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getAuth } from "./index";
 import { authLink } from "../../domain/auth";
 
@@ -29,5 +29,13 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 export async function requireUser(returnTo = "/account"): Promise<CurrentUser> {
   const user = await getCurrentUser();
   if (!user) redirect(authLink("login", returnTo));
+  return user;
+}
+
+export async function requireAdmin(
+  returnTo = "/account",
+): Promise<CurrentUser> {
+  const user = await requireUser(returnTo);
+  if (user.role !== "ADMIN") notFound();
   return user;
 }

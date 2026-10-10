@@ -424,6 +424,12 @@ test("redirects allow only internal shop destinations; local secrets and mailbox
     assert.equal(safeReturnTo(input), "/account");
   const product = "/products/10000000-0000-4000-8000-000000000001";
   assert.equal(
+    safeReturnTo("/products/new?next=https://outside.example"),
+    "/products/new",
+  );
+  assert.equal(safeReturnTo(`${product}/edit?license=WAV`), `${product}/edit`);
+  assert.equal(safeReturnTo("/api/admin/products"), "/account");
+  assert.equal(
     safeReturnTo(`${product}?license=WAV&next=https://outside.example`),
     `${product}?license=WAV`,
   );

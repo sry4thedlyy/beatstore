@@ -34,7 +34,7 @@ test("migration and seed are repeatable without resetting edited data", async ()
   }>(`SELECT
     (SELECT count(*)::integer FROM products) products, (SELECT count(*)::integer FROM offers) offers,
     (SELECT count(*)::integer FROM schema_migrations) migrations`);
-  assert.deepEqual(rows[0], { products: 4, offers: 10, migrations: 2 });
+  assert.deepEqual(rows[0], { products: 4, offers: 10, migrations: 3 });
   assert.equal(
     (await getProducts("edited", undefined, db))[0].title,
     "Midnight Drive edited",
