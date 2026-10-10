@@ -18,10 +18,17 @@
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/database.ts migrate",
     "db:seed": "node --env-file-if-exists=.env.local --import tsx scripts/database.ts seed",
     "db:setup": "node --env-file-if-exists=.env.local --import tsx scripts/database.ts setup",
-    "demo:assets": "tsx scripts/generate-demo-assets.ts"
+    "demo:assets": "tsx scripts/generate-demo-assets.ts",
+    "auth:setup": "tsx scripts/setup-auth.ts",
+    "account:demo": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/demo-account.ts",
+    "mail:inbox": "tsx scripts/mail-inbox.ts",
+    "account:admin": "node --env-file-if-exists=.env.local --import tsx scripts/set-admin.ts"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.7",
     "@electric-sql/pglite": "0.5.8",
+    "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.4",
     "next": "16.4.0",
     "pg": "8.23.1",
     "react": "19.3.0",

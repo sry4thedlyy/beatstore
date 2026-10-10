@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AudioPlayerProvider } from "@/components/audio-player";
+import { AccountNav } from "@/components/account-nav";
+import { getCurrentUser } from "@/server/auth/session";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,9 +12,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const user = await getCurrentUser();
   return (
     <html lang="ru">
       <body>
@@ -32,6 +35,7 @@ export default function RootLayout({
                 <Link href="/">Каталог</Link>
               </nav>
               <span className="demo-tag">Демо-версия</span>
+              <AccountNav signedIn={!!user} />
             </div>
           </header>
           <main className="main-container">{children}</main>

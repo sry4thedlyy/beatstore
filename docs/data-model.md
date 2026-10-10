@@ -18,13 +18,22 @@
 
 ### Пользователь — `users`
 
-Поля: `id`, `email`, `artist_name`, `role`, `created_at`, `updated_at`.
+Поля: `id`, `email`, `artist_name`, `role`, `email_verified`, `image`, `created_at`, `updated_at`. `image` — необязательное служебное поле Better Auth; аватары в интерфейсе формируются из имени. В локальном MVP email не подтверждается письмом.
 
 - Email нормализуется для входа и уникален; имя артиста не обязано быть уникальным.
 - Роли: `CUSTOMER`, `ADMIN`; регистрация всегда создаёт покупателя, роль администратора не принимается из формы регистрации.
-- Пароль хранится только в виде хеша в служебных данных выбранной библиотеки; исходный пароль не сохраняется.
-- Сессии и восстановление пароля обслуживает библиотека авторизации.
+- Пароль хранится только в виде хеша scrypt в `auth_accounts`; исходный пароль не сохраняется.
+- Сессии и восстановление пароля обслуживает Better Auth 1.7.7 через официальный Drizzle-адаптер.
 - Изменение имени артиста или email не меняет данные ранее оформленного заказа.
+
+### Служебные данные авторизации
+
+- `auth_accounts`: `id`, `user_id`, `provider_id`, `account_id`, `password`, служебные поля токенов, `created_at`, `updated_at`. Пара провайдер–аккаунт уникальна; для пароля используется провайдер `credential`, `account_id` соответствует UUID пользователя.
+- `auth_sessions`: `id`, `user_id`, `token`, `expires_at`, `ip_address`, `user_agent`, `created_at`, `updated_at`. Токен уникален; срок и наличие записи проверяются при обращении к кабинету.
+- `auth_verifications`: `id`, `identifier`, `value`, `expires_at`, `created_at`, `updated_at`. Для восстановления пароля `identifier` содержит хеш идентификатора одноразовой ссылки, `value` — UUID пользователя.
+- `auth_rate_limits`: `id`, `key`, `count`, `last_request`. Сохраняет число попыток и время последней попытки в миллисекундах; локальная версия использует общий лимит для каждого маршрута.
+
+Служебные записи добавлены миграцией `002_authentication.sql`. Связи с существующими пользователями и заказами сохраняются. При восстановлении пароля активные сессии пользователя отзываются.
 
 ### Товар — `products`
 
@@ -141,6 +150,8 @@
 ```mermaid
 erDiagram
     USERS ||--o{ ORDERS : purchases
+    USERS ||--o{ AUTH_ACCOUNTS : credentials
+    USERS ||--o{ AUTH_SESSIONS : sessions
     USERS ||--o{ FREE_ACCEPTANCES : accepts
     PRODUCTS ||--|{ OFFERS : offers
     PRODUCTS ||--o{ ORDERS : ordered

@@ -2,6 +2,15 @@ import { PGlite } from "@electric-sql/pglite";
 import { Pool, type PoolClient } from "pg";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import {
+  drizzle as drizzleEmbedded,
+  type PgliteDatabase,
+} from "drizzle-orm/pglite";
+import {
+  drizzle as drizzlePostgres,
+  type NodePgDatabase,
+} from "drizzle-orm/node-postgres";
+import * as authSchema from "../auth/schema";
 
 export interface SqlConnection {
   query<T>(sql: string, parameters?: unknown[]): Promise<{ rows: T[] }>;
@@ -9,6 +18,8 @@ export interface SqlConnection {
 }
 
 export interface Database extends SqlConnection {
+  authStore:
+    PgliteDatabase<typeof authSchema> | NodePgDatabase<typeof authSchema>;
   transaction<T>(work: (connection: SqlConnection) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
@@ -35,6 +46,7 @@ export async function openDatabase(): Promise<Database> {
       max: 5,
     });
     return {
+      authStore: drizzlePostgres(pool, { schema: authSchema }),
       ...postgresConnection(pool),
       async transaction<T>(work: (connection: SqlConnection) => Promise<T>) {
         const client = await pool.connect();
@@ -70,6 +82,7 @@ export async function createEmbeddedDatabase(
   const db = new PGlite(dataDir);
   await db.waitReady;
   return {
+    authStore: drizzleEmbedded(db, { schema: authSchema }),
     query: <T>(sql: string, parameters: unknown[] = []) =>
       db.query<T>(sql, parameters),
     async exec(sql: string) {
