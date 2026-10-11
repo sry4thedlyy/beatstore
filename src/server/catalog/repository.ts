@@ -19,6 +19,7 @@ export interface Product {
   discount: string;
   offers: Offer[];
   mediaBase?: string;
+  reserved?: boolean;
 }
 
 export interface Offer {
@@ -44,6 +45,7 @@ interface ProductRow {
   royalty_percent: string | null;
   project_requirements: string | null;
   discount_percent: string;
+  reserved_order_id: string | null;
 }
 interface OfferRow {
   id: string;
@@ -73,7 +75,7 @@ export async function getProducts(
     .replace(/[\\%_]/g, "\\$&");
   const { rows } = await db.query<ProductRow>(
     `SELECT id, type, title, description, cover_file_id, thumbnail_file_id,
-    preview_file_id, duration_seconds, authors, bpm, musical_key, royalty_percent, project_requirements, discount_percent
+    preview_file_id, duration_seconds, authors, bpm, musical_key, royalty_percent, project_requirements, discount_percent, reserved_order_id
     FROM products WHERE status = 'PUBLISHED' AND title ILIKE $1 ESCAPE '\\' ${id ? "AND id = $2" : ""}
     ORDER BY created_at, id`,
     id ? [`%${query}%`, id] : [`%${query}%`],
@@ -100,6 +102,7 @@ export async function getProducts(
     royalty: row.royalty_percent,
     projectRequirements: row.project_requirements,
     discount: row.discount_percent,
+    reserved: !!row.reserved_order_id,
     offers: offers
       .filter((offer) => offer.product_id === row.id)
       .map((offer) => ({

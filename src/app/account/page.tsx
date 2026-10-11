@@ -5,6 +5,9 @@ import { SignOutButton } from "@/components/account-nav";
 import { Icon } from "@/components/icons";
 import { getAdminCatalog } from "@/server/catalog/admin";
 import { statusNames, STORAGE_LIMIT } from "@/domain/catalog-editor";
+import { getDatabase } from "@/server/db/connection";
+import { getUserOrders } from "@/server/checkout/service";
+import { OrderList } from "@/components/order-list";
 
 export const metadata = { title: "Личный кабинет" };
 export default async function AccountPage() {
@@ -14,6 +17,7 @@ export default async function AccountPage() {
     ? await getAdminOverview(user)
     : await getAccountCounts(user);
   const catalog = admin ? await getAdminCatalog(user) : null;
+  const orders = await getUserOrders(user, await getDatabase());
   return (
     <div className="account-page">
       <Link href="/" className="back-link">
@@ -97,44 +101,25 @@ export default async function AccountPage() {
             </>
           )}
         </section>
-      ) : (
-        <>
-          <section
-            className="account-section"
-            aria-labelledby="purchases-title"
-          >
-            <div className="section-heading">
-              <h2 id="purchases-title">Мои покупки</h2>
-              <span>{counts.purchases}</span>
-            </div>
-            <div className="account-empty">
-              <Icon name="music" width={32} height={32} />
-              <h3>
-                {counts.purchases
-                  ? "Твои покупки сохранены"
-                  : "Твой звук ещё впереди"}
-              </h3>
-              <p>
-                Здесь будут приобретённые биты, драмкиты, файлы и условия
-                лицензий.
-              </p>
-              <Link href="/" className="primary-button">
-                Найти свой звук <Icon name="arrow" />
-              </Link>
-            </div>
-          </section>
-          <section className="account-section" aria-labelledby="pending-title">
-            <div className="section-heading">
-              <h2 id="pending-title">Незавершённые заказы</h2>
-              <span>{counts.pending}</span>
-            </div>
-            <p className="account-description">
-              {counts.pending
-                ? "Есть заказы, ожидающие оплаты."
-                : "Заказов, ожидающих оплаты, пока нет."}
-            </p>
-          </section>
-        </>
+      ) : null}
+      <OrderList
+        orders={orders.filter(
+          (o) => o.status === "PAID" || o.status === "REFUNDED",
+        )}
+        title="Мои покупки"
+        empty="Покупок пока нет. Выбери бит или драмкит в каталоге."
+      />
+      <OrderList
+        orders={orders.filter((o) => o.status === "AWAITING_PAYMENT")}
+        title="Незавершённые заказы"
+        empty="Заказов, ожидающих оплаты, пока нет."
+      />
+      {!!orders.some((o) => o.status === "CANCELLED") && (
+        <OrderList
+          orders={orders.filter((o) => o.status === "CANCELLED")}
+          title="Отменённые заказы"
+          empty=""
+        />
       )}
     </div>
   );

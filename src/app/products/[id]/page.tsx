@@ -40,8 +40,10 @@ export async function generateMetadata({
 
 export default async function ProductPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ license?: string }>;
 }) {
   const visible = await getProduct((await params).id);
   if (!visible) notFound();
@@ -118,6 +120,11 @@ export default async function ProductPage({
             offers={product.offers}
             discount={product.discount}
             royalty={product.royalty}
+            productId={product.id}
+            initialKind={(await searchParams).license}
+            unavailable={
+              !!product.reserved || (!!status && status !== "PUBLISHED")
+            }
           />
           {product.type === "BEAT" && (
             <>

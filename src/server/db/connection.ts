@@ -41,31 +41,7 @@ export async function openDatabase(): Promise<Database> {
   if (driver === "postgres") {
     if (!process.env.DATABASE_URL)
       throw new Error("DATABASE_URL is required for PostgreSQL.");
-    const pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      max: 5,
-    });
-    return {
-      authStore: drizzlePostgres(pool, { schema: authSchema }),
-      ...postgresConnection(pool),
-      async transaction<T>(work: (connection: SqlConnection) => Promise<T>) {
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
-          const result = await work(postgresConnection(client));
-          await client.query("COMMIT");
-          return result;
-        } catch (error) {
-          await client.query("ROLLBACK");
-          throw error;
-        } finally {
-          client.release();
-        }
-      },
-      async close() {
-        await pool.end();
-      },
-    };
+    return openPostgresDatabase(process.env.DATABASE_URL);
   }
   if (driver !== "pglite") throw new Error(`Unsupported DB_DRIVER: ${driver}`);
   // Runtime data must not be bundled into the deployment output.
@@ -74,6 +50,34 @@ export async function openDatabase(): Promise<Database> {
   );
   await mkdir(dataDir, { recursive: true });
   return createEmbeddedDatabase(dataDir);
+}
+
+export function openPostgresDatabase(databaseUrl: string): Database {
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    max: 5,
+  });
+  return {
+    authStore: drizzlePostgres(pool, { schema: authSchema }),
+    ...postgresConnection(pool),
+    async transaction<T>(work: (connection: SqlConnection) => Promise<T>) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await work(postgresConnection(client));
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async close() {
+      await pool.end();
+    },
+  };
 }
 
 export async function createEmbeddedDatabase(

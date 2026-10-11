@@ -17,6 +17,23 @@ export function safeReturnTo(value: unknown): string {
     if (url.pathname === "/" || url.pathname === "/account")
       return url.pathname;
     if (
+      /^\/orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        url.pathname,
+      )
+    )
+      return url.pathname;
+    if (
+      /^\/checkout\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        url.pathname,
+      )
+    ) {
+      const license = url.searchParams.get("license");
+      return license &&
+        ["MP3", "WAV", "STEMS", "EXCLUSIVE", "DRUMKIT"].includes(license)
+        ? `${url.pathname}?license=${license}`
+        : "/account";
+    }
+    if (
       url.pathname === "/products/new" ||
       /^\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i.test(
         url.pathname,

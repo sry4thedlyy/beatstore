@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   calculatePrice,
   formatPrice,
@@ -28,12 +29,20 @@ export function LicenseOptions({
   offers,
   discount,
   royalty,
+  productId,
+  initialKind,
+  unavailable = false,
 }: {
   offers: Option[];
   discount: string;
   royalty: string | null;
+  productId: string;
+  initialKind?: string;
+  unavailable?: boolean;
 }) {
-  const [selected, setSelected] = useState(offers[0]?.id);
+  const [selected, setSelected] = useState(
+    offers.find((o) => o.kind === initialKind)?.id ?? offers[0]?.id,
+  );
   const active = offers.find((offer) => offer.id === selected) ?? offers[0];
   if (!active) return null;
   return (
@@ -88,6 +97,16 @@ export function LicenseOptions({
           <p>{active.terms}</p>
         </details>
       </div>
+      {unavailable ? (
+        <p className="checkout-muted">Новые покупки сейчас недоступны.</p>
+      ) : (
+        <Link
+          className="primary-button purchase-button"
+          href={`/checkout/${productId}?license=${active.kind}`}
+        >
+          Оформить покупку
+        </Link>
+      )}
     </section>
   );
 }

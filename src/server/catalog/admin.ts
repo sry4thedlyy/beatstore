@@ -55,7 +55,7 @@ interface Row {
 }
 const rowQuery = `SELECT p.*,
   EXISTS (SELECT 1 FROM orders o WHERE o.product_id=p.id AND o.paid_at IS NOT NULL) AS has_purchases,
-  EXISTS (SELECT 1 FROM orders o WHERE o.product_id=p.id AND o.status='AWAITING_PAYMENT') AS awaiting,
+  EXISTS (SELECT 1 FROM orders o WHERE o.product_id=p.id AND (o.status='AWAITING_PAYMENT' OR EXISTS (SELECT 1 FROM payments a WHERE a.order_id=o.id AND a.needs_review))) AS awaiting,
   EXISTS (SELECT 1 FROM orders o WHERE o.product_id=p.id AND o.purchase_kind='EXCLUSIVE' AND o.paid_at IS NOT NULL) AS exclusive_sold
   FROM products p WHERE p.id=$1`;
 interface OfferRow {
@@ -369,7 +369,9 @@ export async function getAdminProductView(
   connection?: Database,
 ): Promise<Product> {
   const db = connection ?? (await getDatabase());
-  const item = await getEditorProduct(user, id, db);
+  await assertAdministrator(user, db);
+  const row = await loadRow(db, id);
+  const item = await loadEditor(db, row);
   const { rows: offers } = await db.query<OfferRow>(
     `SELECT o.id,o.kind,o.base_price_kopecks,t.body FROM offers o JOIN terms_versions t ON t.id=o.terms_version_id WHERE o.product_id=$1 ORDER BY o.base_price_kopecks,o.kind`,
     [id],
@@ -390,6 +392,7 @@ export async function getAdminProductView(
     royalty: item.royalty,
     projectRequirements: item.projectRequirements,
     mediaBase: "/api/admin/media",
+    reserved: !!row.reserved_order_id,
     offers: offers
       .filter((o) => o.base_price_kopecks)
       .map((o) => ({
