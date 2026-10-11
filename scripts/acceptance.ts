@@ -192,11 +192,24 @@ async function run() {
       await once(server, "exit");
     } else {
       const traffic = capacity ? await startCapacityTraffic(origin) : undefined;
+      let failure: unknown;
       try {
         await checkShop(origin, root);
-      } finally {
-        await traffic?.finish();
+      } catch (error) {
+        failure = error;
       }
+      try {
+        await traffic?.finish();
+      } catch (error) {
+        if (failure)
+          throw new AggregateError(
+            [failure, error],
+            "Acceptance and traffic checks failed",
+            { cause: error },
+          );
+        throw error;
+      }
+      if (failure) throw failure;
       console.log(
         "Acceptance check passed. Only isolated test data was changed.",
       );
