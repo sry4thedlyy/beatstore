@@ -160,6 +160,7 @@ export async function handleDownloadRequest(
       true,
       file.original_name,
       options.pathForFile ?? localMediaPath,
+      options.storage ?? undefined,
     );
   } catch (e) {
     return deliveryFailure(e);

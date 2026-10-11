@@ -22,6 +22,12 @@ import {
   getEditorProduct,
   lockEditableProduct,
 } from "./admin";
+import {
+  newFileStorage,
+  StorageError,
+  type YandexStorage,
+  type ObjectReference,
+} from "../storage/yandex";
 
 const COVER_RESERVE = 4 * 1024 * 1024;
 export function uploadDirectory(): string {
@@ -186,6 +192,7 @@ export async function uploadProductFile(
   source: UploadSource,
   connection?: Database,
   root = uploadDirectory(),
+  storage?: YandexStorage | null,
 ) {
   const db = connection ?? (await getDatabase());
   if (!Object.hasOwn(uploadLimits, kind))
@@ -197,6 +204,8 @@ export async function uploadProductFile(
   const target = path.join(root, key);
   const pendingSize = size + (kind === "COVER" ? COVER_RESERVE : 0);
   const paths = [target];
+  const cloudObjects: ObjectReference[] = [];
+  let cloud: YandexStorage | null = null;
   let reserved = false,
     committed = false;
   try {
@@ -224,6 +233,7 @@ export async function uploadProductFile(
       );
     });
     reserved = true;
+    cloud = storage === undefined ? newFileStorage() : storage;
     await mkdir(root, { recursive: true });
     let received = 0;
     const limit = new Transform({
@@ -304,6 +314,23 @@ export async function uploadProductFile(
       contentType = "application/zip";
     }
     const checksum = kind === "COVER" ? "" : await hashFile(target);
+    if (cloud) {
+      for (const result of cover && thumbnail
+        ? [cover, thumbnail]
+        : [{ key, bytes: null }]) {
+        const ref = cloud.reference("uploads", result.key);
+        cloudObjects.push(ref);
+        const bytes = result.bytes;
+        await cloud.putFile(
+          ref,
+          path.join(root, result.key),
+          bytes ? bytes.length : size,
+          contentType,
+          bytes ? createHash("sha256").update(bytes).digest("hex") : checksum,
+          fileId,
+        );
+      }
+    }
     await db.transaction(async (tx) => {
       await assertAdministrator(user, tx);
       await tx.exec("LOCK TABLE files IN SHARE ROW EXCLUSIVE MODE");
@@ -315,14 +342,17 @@ export async function uploadProductFile(
         ] as const)
           await tx.query(
             `INSERT INTO files (id,bucket,object_key,original_name,content_type,size_bytes,checksum,kind,status)
-            VALUES ($1,'local-upload',$2,$3,'image/jpeg',$4,$5,$6,'READY')`,
+            VALUES ($1,$7,$2,$3,'image/jpeg',$4,$5,$6,'READY')`,
             [
               result.id,
-              result.key,
+              cloud
+                ? cloud.reference("uploads", result.key).object_key
+                : result.key,
               originalName,
               result.bytes.length,
               createHash("sha256").update(result.bytes).digest("hex"),
               fileKind,
+              cloud?.config.bucket ?? "local-upload",
             ],
           );
         await tx.query(
@@ -332,8 +362,15 @@ export async function uploadProductFile(
         await tx.query("DELETE FROM files WHERE id=$1", [fileId]);
       } else {
         await tx.query(
-          `UPDATE files SET content_type=$2,size_bytes=$3,checksum=$4,status='READY' WHERE id=$1`,
-          [fileId, contentType, size, checksum],
+          `UPDATE files SET content_type=$2,size_bytes=$3,checksum=$4,status='READY',bucket=$5,object_key=$6 WHERE id=$1`,
+          [
+            fileId,
+            contentType,
+            size,
+            checksum,
+            cloud?.config.bucket ?? "local-upload",
+            cloud ? cloud.reference("uploads", key).object_key : key,
+          ],
         );
         if (kind === "MP3" || kind === "PREVIEW")
           await tx.query(
@@ -352,18 +389,28 @@ export async function uploadProductFile(
       );
     });
     committed = true;
-    if (kind === "COVER") await unlink(target).catch(() => {});
+    if (cloud) for (const file of paths) await unlink(file).catch(() => {});
+    else if (kind === "COVER") await unlink(target).catch(() => {});
     return await getEditorProduct(user, id, db);
   } catch (error) {
     if (!committed) {
       // Only random paths created by this request are removed; stored versions are retained.
       for (const file of paths) await unlink(file).catch(() => {});
-      if (reserved)
+      let cleaned = true;
+      if (cloud)
+        for (const ref of cloudObjects)
+          cleaned = (await cloud.removeOwned(ref, fileId)) && cleaned;
+      if (reserved && cleaned)
         await db.query(`DELETE FROM files WHERE id=$1 AND status='PENDING'`, [
           fileId,
         ]);
     }
     if (error instanceof CatalogError) throw error;
+    if (error instanceof StorageError)
+      throw new CatalogError(
+        503,
+        "Хранилище недоступно. Попробуй загрузить файл позже.",
+      );
     if (source.stream.locked || (error as Error).name === "AbortError")
       throw new CatalogError(400, "Загрузка не завершена. Попробуй ещё раз.");
     throw error;

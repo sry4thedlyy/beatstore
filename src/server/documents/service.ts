@@ -10,6 +10,11 @@ import {
   renderLicensePdf,
   type LicenseDocumentInput,
 } from "./pdf";
+import {
+  newFileStorage,
+  type YandexStorage,
+  type ObjectReference,
+} from "../storage/yandex";
 
 const RESERVE = 2 * 1024 * 1024;
 export function documentDirectory() {
@@ -18,6 +23,7 @@ export function documentDirectory() {
 export interface DocumentOptions {
   directory?: string;
   render?: (input: LicenseDocumentInput) => Promise<Buffer>;
+  storage?: YandexStorage | null;
 }
 export async function ensureLicenseDocument(
   orderId: string,
@@ -48,7 +54,14 @@ export async function ensureLicenseDocument(
   let reserved = false,
     written = false,
     ready = false;
+  let cloud: YandexStorage | null = null,
+    ref: ObjectReference | undefined;
   try {
+    cloud = options.storage === undefined ? newFileStorage() : options.storage;
+    const destination = cloud
+      ? cloud.reference("documents", key)
+      : { bucket: "local-document", object_key: key };
+    ref = destination;
     if (doc.renderer_version !== PDF_RENDERER_VERSION)
       throw new Error("Unavailable renderer version");
     const { rows: orders } = await db.query<{
@@ -77,24 +90,35 @@ export async function ensureLicenseDocument(
         throw new Error("Storage quota exceeded");
       await tx.query(
         `INSERT INTO files(id,bucket,object_key,original_name,content_type,size_bytes,checksum,kind,status)
-        VALUES($1,'local-document',$2,$3,'application/pdf',$4,$5,'DOCUMENT','PENDING')`,
+        VALUES($1,$6,$2,$3,'application/pdf',$4,$5,'DOCUMENT','PENDING')`,
         [
           fileId,
-          key,
+          destination.object_key,
           `license-${orderId}.pdf`,
           bytes.length,
           createHash("sha256").update(bytes).digest("hex"),
+          destination.bucket,
         ],
       );
     });
     reserved = true;
-    await mkdir(directory, { recursive: true });
-    const handle = await open(target, "wx", 0o600);
-    written = true;
-    try {
-      await handle.writeFile(bytes);
-    } finally {
-      await handle.close();
+    if (cloud) {
+      await cloud.putBytes(
+        ref,
+        bytes,
+        "application/pdf",
+        createHash("sha256").update(bytes).digest("hex"),
+        lease,
+      );
+    } else {
+      await mkdir(directory, { recursive: true });
+      const handle = await open(target, "wx", 0o600);
+      written = true;
+      try {
+        await handle.writeFile(bytes);
+      } finally {
+        await handle.close();
+      }
     }
     await db.transaction(async (tx) => {
       await tx.exec("LOCK TABLE files IN SHARE ROW EXCLUSIVE MODE");
@@ -113,7 +137,13 @@ export async function ensureLicenseDocument(
     ready = true;
   } catch {
     if (written && !ready) await unlink(target).catch(() => {});
-    if (reserved && !ready)
+    const cleaned =
+      !cloud ||
+      !ref ||
+      !reserved ||
+      ready ||
+      (await cloud.removeOwned(ref, lease));
+    if (reserved && !ready && cleaned)
       await db.query("DELETE FROM files WHERE id=$1 AND status='PENDING'", [
         fileId,
       ]);

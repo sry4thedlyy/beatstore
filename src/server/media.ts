@@ -5,6 +5,13 @@ import path from "node:path";
 import { getDatabase, type Database } from "./db/connection";
 import type { CurrentUser } from "./auth/session";
 import { assertAdministrator } from "./catalog/admin";
+import { LOCAL_BUCKETS } from "./storage/config";
+import {
+  MissingObjectError,
+  yandexStorage,
+  type YandexStorage,
+  type ObjectMetadata,
+} from "./storage/yandex";
 
 export interface MediaFile {
   id: string;
@@ -31,7 +38,7 @@ export async function getPublicMedia(
 }
 
 export function localMediaPath(file: MediaFile): string {
-  if (!["local-demo", "local-upload", "local-document"].includes(file.bucket))
+  if (!LOCAL_BUCKETS.includes(file.bucket))
     throw new Error("Storage provider is not configured for this file");
   const root = path.resolve(
     /*turbopackIgnore: true*/ file.bucket === "local-demo"
@@ -70,16 +77,29 @@ export async function mediaResponse(
   privateMedia = false,
   downloadName?: string,
   pathForFile = localMediaPath,
+  storage?: YandexStorage,
 ): Promise<Response> {
-  let filename: string;
+  let filename: string | undefined,
+    cloud: YandexStorage | undefined,
+    info: ObjectMetadata | undefined;
   const size = Number(file.size_bytes);
   try {
-    filename = pathForFile(file);
-    if ((await stat(filename)).size !== size)
-      throw new Error("Incomplete file");
-  } catch {
+    if (LOCAL_BUCKETS.includes(file.bucket)) {
+      filename = pathForFile(file);
+      if ((await stat(filename)).size !== size)
+        throw new Error("Incomplete file");
+    } else {
+      cloud = storage ?? yandexStorage();
+      info = await cloud.head(file, request.signal);
+      if (info.size !== size || info.checksum !== file.checksum)
+        throw new Error("Incomplete object");
+    }
+  } catch (e) {
     return new Response(null, {
-      status: 404,
+      status:
+        LOCAL_BUCKETS.includes(file.bucket) || e instanceof MissingObjectError
+          ? 404
+          : 503,
       headers: { "Cache-Control": "private, no-store" },
     });
   }
@@ -122,12 +142,21 @@ export async function mediaResponse(
   );
   if (range)
     headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
-  const stream = head
-    ? null
-    : (Readable.toWeb(
-        createReadStream(filename, range ?? undefined),
-      ) as ReadableStream<Uint8Array>);
-  return new Response(stream, { status: range ? 206 : 200, headers });
+  try {
+    const stream = head
+      ? null
+      : cloud
+        ? await cloud.open(file, info!, range ?? undefined, request.signal)
+        : (Readable.toWeb(
+            createReadStream(filename!, { ...range, signal: request.signal }),
+          ) as ReadableStream<Uint8Array>);
+    return new Response(stream, { status: range ? 206 : 200, headers });
+  } catch (e) {
+    return new Response(null, {
+      status: e instanceof MissingObjectError ? 404 : 503,
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  }
 }
 
 export function parseRange(
