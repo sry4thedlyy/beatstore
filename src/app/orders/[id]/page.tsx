@@ -41,7 +41,11 @@ export default async function OrderPage({
       <h1>{order.snapshot.product.title}</h1>
       <div className="checkout-layout">
         <PurchaseConditions snapshot={order.snapshot} />
-        <OrderPanel initial={order} delivery={delivery} />
+        <OrderPanel
+          key={`${order.id}:${order.status}:${order.payment?.needsReview}`}
+          initial={order}
+          delivery={delivery}
+        />
       </div>
     </div>
   );

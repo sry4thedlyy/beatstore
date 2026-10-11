@@ -1,6 +1,9 @@
 "use client";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { readJson, requestFailure } from "./read-json";
+const downloadFailure =
+  "Не удалось подготовить скачивание. Проверь соединение и повтори попытку.";
 export function DownloadButton({
   url,
   body,
@@ -27,14 +30,13 @@ export function DownloadButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.message);
+      const value = await readJson<{ url?: string }>(response, downloadFailure);
       if (!retry) {
         if (
           typeof value.url !== "string" ||
           !value.url.startsWith("/api/downloads?token=")
         )
-          throw new Error("Не удалось получить ссылку.");
+          throw new Error(downloadFailure);
         const a = document.createElement("a");
         a.href = value.url;
         a.referrerPolicy = "no-referrer";
@@ -45,9 +47,7 @@ export function DownloadButton({
       }
       router.refresh();
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Не удалось подготовить скачивание.",
-      );
+      setError(requestFailure(e, downloadFailure));
     } finally {
       running.current = false;
       setBusy(false);

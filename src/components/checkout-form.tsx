@@ -3,6 +3,9 @@ import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { formatPrice, offerNames } from "@/domain/pricing";
 import type { PaymentProviderName, PurchaseSnapshot } from "@/domain/checkout";
+import { readJson, requestFailure } from "./read-json";
+const checkoutFailure =
+  "Не удалось получить ответ сервера. Проверь заказы в личном кабинете или повтори оформление.";
 export function CheckoutForm({
   snapshot,
   revision,
@@ -35,13 +38,11 @@ export function CheckoutForm({
           accepted: form.get("accepted") === "on",
         }),
       });
-      const value = await response.json();
-      if (!response.ok)
-        throw new Error(value.message ?? "Не удалось создать заказ.");
+      const value = await readJson<{ id: string }>(response, checkoutFailure);
       router.push(`/orders/${value.id}`);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось создать заказ.");
+      setError(requestFailure(e, checkoutFailure));
       setBusy(false);
     }
   }

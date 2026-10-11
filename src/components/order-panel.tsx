@@ -6,6 +6,9 @@ import { orderStatusNames, type OrderView } from "@/domain/checkout";
 import { formatPrice } from "@/domain/pricing";
 import { DeliveryPanel } from "./delivery-panel";
 import type { DeliveryView } from "@/domain/delivery";
+import { readJson, requestFailure } from "./read-json";
+const paymentFailure =
+  "Не удалось проверить оплату. Заказ сохранён; обнови страницу или попробуй позже.";
 export function OrderPanel({
   initial,
   delivery,
@@ -29,12 +32,12 @@ export function OrderPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: name }),
       });
-      const v = await r.json();
-      if (!r.ok) throw new Error(v.message);
+      const v = await readJson<OrderView>(r, paymentFailure);
       setOrder(v);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось проверить оплату.");
+      setError(requestFailure(e, paymentFailure));
+      router.refresh();
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -56,7 +59,7 @@ export function OrderPanel({
             body: JSON.stringify({ action: "refresh" }),
           });
           if (r.ok) {
-            const v: OrderView = await r.json();
+            const v = await readJson<OrderView>(r, paymentFailure);
             if (!disposed) {
               setOrder(v);
               if (v.status !== "AWAITING_PAYMENT") {
