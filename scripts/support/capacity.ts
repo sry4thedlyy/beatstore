@@ -6,6 +6,66 @@ import { setTimeout as delay } from "node:timers/promises";
 import { crc32 } from "node:zlib";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
+import { request as httpRequest } from "node:http";
+import type { Readable } from "node:stream";
+
+// Fetch in the test runtime retains large streamed request bodies. The native
+// HTTP client uses writable backpressure without retaining the sent bytes.
+export function streamedUpload(
+  url: URL,
+  headers: Headers,
+  body: Readable,
+  signal: AbortSignal,
+): Promise<Response> {
+  assert.equal(url.protocol, "http:");
+  assert(["localhost", "127.0.0.1"].includes(url.hostname));
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      url,
+      { method: "PUT", headers: Object.fromEntries(headers), signal },
+      (incoming) => {
+        void (async () => {
+          const parts: Buffer[] = [];
+          let size = 0;
+          for await (const part of incoming) {
+            const bytes = Buffer.from(part);
+            size += bytes.length;
+            assert(
+              size <= 1024 * 1024,
+              "Unexpectedly large upload JSON response",
+            );
+            parts.push(bytes);
+          }
+          const responseHeaders = new Headers();
+          for (let i = 0; i < incoming.rawHeaders.length; i += 2)
+            responseHeaders.append(
+              incoming.rawHeaders[i],
+              incoming.rawHeaders[i + 1],
+            );
+          resolve(
+            new Response(Buffer.concat(parts), {
+              status: incoming.statusCode!,
+              headers: responseHeaders,
+            }),
+          );
+        })().catch((error: Error) => {
+          body.destroy();
+          request.destroy();
+          reject(error);
+        });
+      },
+    );
+    request.once("error", (error) => {
+      body.destroy();
+      reject(error);
+    });
+    body.once("error", (error) => {
+      request.destroy();
+      reject(error);
+    });
+    body.pipe(request);
+  });
+}
 
 const MiB = 1024 * 1024;
 const group = "/sys/fs/cgroup";

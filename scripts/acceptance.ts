@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { PDFDocument } from "pdf-lib";
+import { Readable } from "node:stream";
 import type { EditorProduct, UploadKind } from "../src/domain/catalog-editor";
 import type { OrderView } from "../src/domain/checkout";
 import type { DeliveryView, FreeDownloadView } from "../src/domain/delivery";
@@ -25,6 +26,7 @@ import {
   capacityTraffic,
   capacityZip,
   verifyCapacityDownload,
+  streamedUpload,
 } from "./support/capacity";
 
 const project = fileURLToPath(new URL("../", import.meta.url));
@@ -88,7 +90,7 @@ async function run() {
     let origin = `http://localhost:${port}`;
     if (postgres) database = await acceptancePostgres(root);
     if (useProxy) {
-      assert(process.env.CADDY_BIN, "Capacity check requires CADDY_BIN");
+      assert(process.env.CADDY_BIN, "Proxy check requires CADDY_BIN");
       const listener = createServer();
       await new Promise<void>((resolve, reject) => {
         listener.once("error", reject);
@@ -100,7 +102,7 @@ async function run() {
       const config = path.join(root, "Caddyfile");
       await writeFile(
         config,
-        `{\n admin off\n auto_https off\n}\nhttp://localhost:${proxyPort} {\n request_body {\n max_size 525MB\n }\n reverse_proxy 127.0.0.1:${port}\n}\n`,
+        `{\n admin off\n auto_https off\n}\nhttp://localhost:${proxyPort} {\n bind 127.0.0.1\n request_body {\n max_size 525MB\n }\n reverse_proxy 127.0.0.1:${port}\n}\n`,
       );
       proxy = spawn(
         process.env.CADDY_BIN,
@@ -109,6 +111,7 @@ async function run() {
           cwd: root,
           env: { ...process.env, XDG_DATA_HOME: root, XDG_CONFIG_HOME: root },
           stdio: "inherit",
+          windowsHide: true,
         },
       );
     }
@@ -237,12 +240,21 @@ class Client {
       );
     if (init.method && !["GET", "HEAD"].includes(init.method))
       headers.set("Origin", this.origin);
-    const response = await fetch(new URL(url, this.origin), {
-      ...init,
-      headers,
-      redirect: "manual",
-      signal: init.signal ?? AbortSignal.timeout(30000),
-    });
+    const uploadBody: unknown = init.body;
+    const response =
+      uploadBody instanceof Readable
+        ? await streamedUpload(
+            new URL(url, this.origin),
+            headers,
+            uploadBody,
+            init.signal ?? AbortSignal.timeout(180000),
+          )
+        : await fetch(new URL(url, this.origin), {
+            ...init,
+            headers,
+            redirect: "manual",
+            signal: init.signal ?? AbortSignal.timeout(30000),
+          });
     for (const cookie of response.headers.getSetCookie()) {
       const pair = cookie.split(";")[0],
         index = pair.indexOf("=");
@@ -537,6 +549,12 @@ async function checkShop(origin: string, root: string) {
           "Content-Type": "application/octet-stream",
           "X-File-Name": name,
           "X-File-Size": String(streamed?.size ?? bytes!.length),
+          ...(streamed
+            ? {
+                "Content-Length": String(streamed.size),
+                "Accept-Encoding": "identity",
+              }
+            : {}),
           "X-Product-Revision": String(draft.revision),
         },
         body: streamed ? streamed.stream() : Uint8Array.from(bytes!),
