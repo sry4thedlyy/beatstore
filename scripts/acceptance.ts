@@ -31,6 +31,8 @@ const project = fileURLToPath(new URL("../", import.meta.url));
 const work = path.join(project, "work");
 const serve = process.argv.includes("--serve");
 const capacity = process.argv.includes("--capacity");
+const largeFiles = capacity || process.argv.includes("--large-files");
+const useProxy = capacity || process.argv.includes("--proxy");
 const postgres = capacity || process.argv.includes("--postgres");
 assert(!(serve && capacity), "Capacity check cannot run in interactive mode");
 const portOption = process.argv.find((value) => value.startsWith("--port="));
@@ -85,7 +87,7 @@ async function run() {
     await new Promise<void>((resolve) => socket.close(() => resolve()));
     let origin = `http://localhost:${port}`;
     if (postgres) database = await acceptancePostgres(root);
-    if (capacity) {
+    if (useProxy) {
       assert(process.env.CADDY_BIN, "Capacity check requires CADDY_BIN");
       const listener = createServer();
       await new Promise<void>((resolve, reject) => {
@@ -267,6 +269,11 @@ class Client {
     assert.equal(response.status, status, url);
     return response.text();
   }
+  async status(url: string, status: number) {
+    const response = await this.request(url);
+    assert.equal(response.status, status, url.split("?")[0]);
+    if (response.body) for await (const chunk of response.body) void chunk;
+  }
 }
 async function checkShop(origin: string, root: string) {
   const guest = new Client(origin),
@@ -284,6 +291,7 @@ async function checkShop(origin: string, root: string) {
     new URL(redirect.headers.get("location")!, origin).searchParams.get("next"),
     `/checkout/${beat}?license=WAV`,
   );
+  await redirect.body?.cancel();
   await guest.json("/api/orders", {}, 401);
   await guest.json("/api/admin/products", {}, 401);
   console.log("PASS: catalog, search, guest access");
@@ -321,7 +329,7 @@ async function checkShop(origin: string, root: string) {
     `/api/products/${beat}/free-download`,
     { accepted: true, revision: free.revision, termsId: free.termsId },
   );
-  assert.equal((await buyer.request(grant.url)).status, 200);
+  await buyer.status(grant.url, 200);
   await other.json(grant.url, undefined, 404);
   assert.equal(
     (await buyer.json<FreeDownloadView>(`/api/products/${beat}/free-download`))
@@ -378,10 +386,7 @@ async function checkShop(origin: string, root: string) {
   });
   assert.equal(audio.status, 206);
   assert.equal((await audio.arrayBuffer()).byteLength, 32);
-  assert.equal(
-    (await guest.request(`/media/${order.snapshot.file.id}`)).status,
-    404,
-  );
+  await guest.status(`/media/${order.snapshot.file.id}`, 404);
   await other.json(file.url, undefined, 404);
   const document = await buyer.json<{ url: string }>(
     `/api/orders/${order.id}/delivery`,
@@ -459,7 +464,7 @@ async function checkShop(origin: string, root: string) {
     "PAID",
   );
   assert.doesNotMatch(await guest.page("/"), /Midnight Drive/);
-  assert.equal((await buyer.request(file.url)).status, 200);
+  await buyer.status(file.url, 200);
   await buyer.json(grant.url, undefined, 404);
   await buyer.json("/api/orders", await orderInput("WAV"), 409);
   console.log(
@@ -495,7 +500,7 @@ async function checkShop(origin: string, root: string) {
     201,
   );
   assert.doesNotMatch(await guest.page("/"), /Acceptance draft/);
-  assert.equal((await guest.request(`/products/${draft.id}`)).status, 404);
+  await guest.status(`/products/${draft.id}`, 404);
   await admin.json(
     `/api/admin/products/${draft.id}`,
     { ...editorInput(draft), action: "publish" },
@@ -513,14 +518,14 @@ async function checkShop(origin: string, root: string) {
     200,
     "PATCH",
   );
-  const largeZip = capacity ? await capacityZip(root) : undefined;
+  const largeZip = largeFiles ? await capacityZip(root) : undefined;
   for (const [kind, name] of [
     ["COVER", "cover.jpg"],
     ["PREVIEW", "preview.mp3"],
     ["DRUMKIT", "drumkit.zip"],
   ] as const) {
     const streamed = kind === "DRUMKIT" ? largeZip : undefined;
-    if (capacity) console.log(`CAPACITY_PHASE upload ${kind}`);
+    if (largeFiles) console.log(`CAPACITY_PHASE upload ${kind}`);
     const bytes = streamed
       ? undefined
       : await readFile(path.join(root, ".data/demo-assets/dust", name));
@@ -542,7 +547,7 @@ async function checkShop(origin: string, root: string) {
     );
     assert.equal(response.status, 200, `new drumkit upload ${kind}`);
     draft = (await response.json()) as EditorProduct;
-    if (capacity) console.log(`CAPACITY_PHASE uploaded ${kind}`);
+    if (largeFiles) console.log(`CAPACITY_PHASE uploaded ${kind}`);
   }
   assert.deepEqual(draft.missing, []);
   draft = await admin.json<EditorProduct>(
@@ -579,10 +584,7 @@ async function checkShop(origin: string, root: string) {
       largeZip,
     );
   }
-  assert.equal(
-    (await guest.request(`/media/${draft.files.PREVIEW!.id}`)).status,
-    200,
-  );
+  await guest.status(`/media/${draft.files.PREVIEW!.id}`, 200);
   draft = await admin.json<EditorProduct>(
     `/api/admin/products/${draft.id}`,
     { ...editorInput(draft), action: "unpublish" },
@@ -590,10 +592,7 @@ async function checkShop(origin: string, root: string) {
     "PATCH",
   );
   assert.doesNotMatch(await guest.page("/"), /Acceptance draft/);
-  assert.equal(
-    (await guest.request(`/media/${draft.files.PREVIEW!.id}`)).status,
-    404,
-  );
+  await guest.status(`/media/${draft.files.PREVIEW!.id}`, 404);
   draft = await admin.json<EditorProduct>(
     `/api/admin/products/${draft.id}`,
     { ...editorInput(draft), action: "publish" },
@@ -603,7 +602,7 @@ async function checkShop(origin: string, root: string) {
   await admin.json(
     `/api/admin/products/${draft.id}`,
     { revision: draft.revision, confirmation: draft.title },
-    capacity ? 409 : 200,
+    largeFiles ? 409 : 200,
     "DELETE",
   );
   console.log(
@@ -632,6 +631,7 @@ async function checkShop(origin: string, root: string) {
   const token = new URL(link.headers.get("location")!, origin).searchParams.get(
     "token",
   );
+  await link.body?.cancel();
   assert(token);
   await guest.json("/api/auth/reset-password", {
     token,
