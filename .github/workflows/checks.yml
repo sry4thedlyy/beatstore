@@ -63,4 +63,9 @@ jobs:
       - name: Prepare Ubuntu, PostgreSQL and reverse proxy
         run: docker build -f deploy/capacity.Dockerfile -t beatstore-capacity .
       - name: Check one CPU and the 768 MiB application budget without swap
-        run: docker run --rm --cpus=1 --memory=768m --memory-swap=768m --shm-size=128m beatstore-capacity
+        run: |
+          status=0
+          docker run --name beatstore-capacity-check --cpus=1 --memory=768m --memory-swap=768m --shm-size=128m beatstore-capacity || status=$?
+          docker inspect --format 'Exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}' beatstore-capacity-check
+          docker rm -f beatstore-capacity-check
+          exit "$status"

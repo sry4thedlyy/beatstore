@@ -520,6 +520,7 @@ async function checkShop(origin: string, root: string) {
     ["DRUMKIT", "drumkit.zip"],
   ] as const) {
     const streamed = kind === "DRUMKIT" ? largeZip : undefined;
+    if (capacity) console.log(`CAPACITY_PHASE upload ${kind}`);
     const bytes = streamed
       ? undefined
       : await readFile(path.join(root, ".data/demo-assets/dust", name));
@@ -541,6 +542,7 @@ async function checkShop(origin: string, root: string) {
     );
     assert.equal(response.status, 200, `new drumkit upload ${kind}`);
     draft = (await response.json()) as EditorProduct;
+    if (capacity) console.log(`CAPACITY_PHASE uploaded ${kind}`);
   }
   assert.deepEqual(draft.missing, []);
   draft = await admin.json<EditorProduct>(
@@ -551,6 +553,7 @@ async function checkShop(origin: string, root: string) {
   );
   assert.match(await guest.page("/"), /Acceptance draft/);
   if (largeZip) {
+    console.log("CAPACITY_PHASE purchase large ZIP");
     const largeOrder = await buyer.json<OrderView>(
       "/api/orders",
       {

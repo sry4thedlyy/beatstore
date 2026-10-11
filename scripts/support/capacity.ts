@@ -51,6 +51,7 @@ export async function capacityMonitor() {
   let stopped = false,
     failure: unknown,
     workingPeak = 0;
+  let lastReport = 0;
   const sample = (async () => {
     try {
       while (!stopped) {
@@ -60,6 +61,18 @@ export async function capacityMonitor() {
           workingPeak,
           memory.anon + memory.shmem + memory.kernel,
         );
+        if (performance.now() - lastReport >= 1000) {
+          lastReport = performance.now();
+          console.log(
+            "CAPACITY_SAMPLE",
+            JSON.stringify({
+              anonSharedKernelMiB: Math.round(
+                (memory.anon + memory.shmem + memory.kernel) / MiB,
+              ),
+              clientRssMiB: Math.round(process.memoryUsage().rss / MiB),
+            }),
+          );
+        }
         await delay(100);
       }
     } catch (error) {
@@ -152,6 +165,7 @@ export function capacityTraffic(
 // Store-only fixture at the exact upload boundary. Fixed-size chunks avoid a
 // 500 MiB client buffer that would distort the server's memory measurement.
 export async function capacityZip(root: string) {
+  console.log("CAPACITY_PHASE create ZIP");
   const filename = path.join(root, "capacity.zip");
   const name = Buffer.from("USAGE.txt");
   const size = 500 * MiB;
@@ -207,6 +221,7 @@ export async function capacityZip(root: string) {
   } finally {
     await file.close();
   }
+  console.log("CAPACITY_PHASE ZIP ready");
   return {
     filename,
     size,
