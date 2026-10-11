@@ -17,6 +17,7 @@
     "test": "tsx --conditions=react-server --import ./tests/support/local-storage.ts --test tests/*.test.ts",
     "test:postgres": "tsx --conditions=react-server --import ./tests/support/local-storage.ts --test tests/checkout.postgres.ts",
     "test:smoke": "tsx scripts/acceptance.ts",
+    "test:smoke:postgres": "tsx scripts/acceptance.ts --postgres",
     "demo:acceptance": "tsx scripts/acceptance.ts --serve --port=3100",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/database.ts migrate",
     "db:seed": "node --env-file-if-exists=.env.local --import tsx scripts/database.ts seed",

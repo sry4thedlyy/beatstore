@@ -176,6 +176,7 @@ Yandex Object Storage подключается через `STORAGE_DRIVER=yandex
 - [Хранилище Yandex Object Storage](docs/storage.md)
 - [Приемка демонстрационного MVP](docs/acceptance.md)
 - [Публичное размещение и почта](docs/deployment.md)
+- [Проверка минимальной конфигурации VPS](docs/capacity.md)
 - [Резервные копии и восстановление](docs/backups.md)
 - [Next.js: установка и запуск](https://nextjs.org/docs/app/getting-started/installation)
 - [PGlite: локальное сохранение базы](https://pglite.dev/docs/filesystems)

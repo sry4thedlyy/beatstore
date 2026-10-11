@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { access, cp, mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
+import {
+  access,
+  cp,
+  mkdir,
+  mkdtemp,
+  rm,
+  readFile,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,10 +19,20 @@ import { PDFDocument } from "pdf-lib";
 import type { EditorProduct, UploadKind } from "../src/domain/catalog-editor";
 import type { OrderView } from "../src/domain/checkout";
 import type { DeliveryView, FreeDownloadView } from "../src/domain/delivery";
+import { acceptancePostgres } from "./support/acceptance-postgres";
+import {
+  capacityMonitor,
+  capacityTraffic,
+  capacityZip,
+  verifyCapacityDownload,
+} from "./support/capacity";
 
 const project = fileURLToPath(new URL("../", import.meta.url));
 const work = path.join(project, "work");
 const serve = process.argv.includes("--serve");
+const capacity = process.argv.includes("--capacity");
+const postgres = capacity || process.argv.includes("--postgres");
+assert(!(serve && capacity), "Capacity check cannot run in interactive mode");
 const portOption = process.argv.find((value) => value.startsWith("--port="));
 const requestedPort = portOption ? Number(portOption.slice(7)) : 0;
 if (
@@ -30,17 +48,20 @@ await mkdir(work, { recursive: true });
 const root = await mkdtemp(path.join(work, "acceptance-"));
 let server: ChildProcess | undefined;
 let setupProcess: ChildProcess | undefined;
+let proxy: ChildProcess | undefined;
+let database: Awaited<ReturnType<typeof acceptancePostgres>> | undefined;
 let stopping = false;
 async function stop() {
   if (stopping) return;
   stopping = true;
-  for (const child of [setupProcess, server]) {
+  for (const child of [setupProcess, server, proxy]) {
     if (child && child.exitCode === null && child.signalCode === null) {
       const exited = once(child, "exit");
       child.kill("SIGTERM");
       await exited;
     }
   }
+  await database?.stop();
   // This directory was created by this run; never remove the working database.
   const target = path.resolve(root);
   if (!target.startsWith(path.resolve(work) + path.sep))
@@ -52,7 +73,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     void stop().then(() => process.exit(0));
   });
 async function run() {
+  let monitor: Awaited<ReturnType<typeof capacityMonitor>> | undefined;
   try {
+    monitor = capacity ? await capacityMonitor() : undefined;
     const socket = createServer();
     await new Promise<void>((resolve, reject) => {
       socket.once("error", reject);
@@ -60,11 +83,37 @@ async function run() {
     });
     const port = (socket.address() as { port: number }).port;
     await new Promise<void>((resolve) => socket.close(() => resolve()));
-    const origin = `http://localhost:${port}`;
+    let origin = `http://localhost:${port}`;
+    if (postgres) database = await acceptancePostgres(root);
+    if (capacity) {
+      assert(process.env.CADDY_BIN, "Capacity check requires CADDY_BIN");
+      const listener = createServer();
+      await new Promise<void>((resolve, reject) => {
+        listener.once("error", reject);
+        listener.listen(0, "127.0.0.1", resolve);
+      });
+      const proxyPort = (listener.address() as { port: number }).port;
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+      origin = `http://localhost:${proxyPort}`;
+      const config = path.join(root, "Caddyfile");
+      await writeFile(
+        config,
+        `{\n admin off\n auto_https off\n}\nhttp://localhost:${proxyPort} {\n request_body {\n max_size 525MB\n }\n reverse_proxy 127.0.0.1:${port}\n}\n`,
+      );
+      proxy = spawn(
+        process.env.CADDY_BIN,
+        ["run", "--config", config, "--adapter", "caddyfile"],
+        {
+          cwd: root,
+          env: { ...process.env, XDG_DATA_HOME: root, XDG_CONFIG_HOME: root },
+          stdio: "inherit",
+        },
+      );
+    }
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       NODE_ENV: "production",
-      DB_DRIVER: "pglite",
+      DB_DRIVER: postgres ? "postgres" : "pglite",
       PGLITE_DATA_DIR: path.join(root, ".data/postgres"),
       BETTER_AUTH_URL: origin,
       BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
@@ -75,7 +124,7 @@ async function run() {
       SMTP_USER: "",
       SMTP_PASSWORD: "",
       SMTP_FROM: "",
-      DATABASE_URL: "",
+      DATABASE_URL: database?.url ?? "",
       YOOKASSA_SHOP_ID: "",
       YOOKASSA_SECRET_KEY: "",
       YC_STORAGE_BUCKET: "",
@@ -142,13 +191,22 @@ async function run() {
       );
       await once(server, "exit");
     } else {
-      await checkShop(origin, root);
+      const traffic = capacity ? await startCapacityTraffic(origin) : undefined;
+      try {
+        await checkShop(origin, root);
+      } finally {
+        await traffic?.finish();
+      }
       console.log(
         "Acceptance check passed. Only isolated test data was changed.",
       );
     }
   } finally {
-    await stop();
+    try {
+      await monitor?.finish();
+    } finally {
+      await stop();
+    }
   }
 }
 
@@ -168,7 +226,7 @@ class Client {
       ...init,
       headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(30000),
+      signal: init.signal ?? AbortSignal.timeout(30000),
     });
     for (const cookie of response.headers.getSetCookie()) {
       const pair = cookie.split(";")[0],
@@ -230,6 +288,9 @@ async function checkShop(origin: string, root: string) {
     email: "admin@example.test",
     password: "Beatstore-admin-2026",
   });
+  const kitEditor = await admin.json<EditorProduct>(
+    `/api/admin/products/${kit}`,
+  );
   await other.json(
     "/api/admin/products",
     { title: "Forbidden", type: "BEAT" },
@@ -391,9 +452,6 @@ async function checkShop(origin: string, root: string) {
   console.log(
     "PASS: repeat purchase, cancellation, file versions, exclusive reservation and sale",
   );
-  const kitEditor = await admin.json<EditorProduct>(
-    `/api/admin/products/${kit}`,
-  );
   const kitOrder = await buyer.json<OrderView>(
     "/api/orders",
     {
@@ -414,10 +472,10 @@ async function checkShop(origin: string, root: string) {
     `/api/orders/${kitOrder.id}/delivery`,
     { action: "file" },
   );
-  assert.equal(
-    (await buyer.request(archive.url)).headers.get("Content-Type"),
-    "application/zip",
-  );
+  const kitResponse = await buyer.request(archive.url);
+  assert.equal(kitResponse.status, 200);
+  assert.equal(kitResponse.headers.get("Content-Type"), "application/zip");
+  await kitResponse.arrayBuffer();
   let draft = await admin.json<EditorProduct>(
     "/api/admin/products",
     { title: "Acceptance draft", type: "DRUMKIT" },
@@ -442,14 +500,16 @@ async function checkShop(origin: string, root: string) {
     200,
     "PATCH",
   );
+  const largeZip = capacity ? await capacityZip(root) : undefined;
   for (const [kind, name] of [
     ["COVER", "cover.jpg"],
     ["PREVIEW", "preview.mp3"],
     ["DRUMKIT", "drumkit.zip"],
   ] as const) {
-    const bytes = await readFile(
-      path.join(root, ".data/demo-assets/dust", name),
-    );
+    const streamed = kind === "DRUMKIT" ? largeZip : undefined;
+    const bytes = streamed
+      ? undefined
+      : await readFile(path.join(root, ".data/demo-assets/dust", name));
     const response = await admin.request(
       `/api/admin/products/${draft.id}/files/${kind}`,
       {
@@ -457,11 +517,14 @@ async function checkShop(origin: string, root: string) {
         headers: {
           "Content-Type": "application/octet-stream",
           "X-File-Name": name,
-          "X-File-Size": String(bytes.length),
+          "X-File-Size": String(streamed?.size ?? bytes!.length),
           "X-Product-Revision": String(draft.revision),
         },
-        body: Uint8Array.from(bytes),
-      },
+        body: streamed ? streamed.stream() : Uint8Array.from(bytes!),
+        ...(streamed
+          ? { duplex: "half", signal: AbortSignal.timeout(180000) }
+          : {}),
+      } as RequestInit,
     );
     assert.equal(response.status, 200, `new drumkit upload ${kind}`);
     draft = (await response.json()) as EditorProduct;
@@ -474,6 +537,32 @@ async function checkShop(origin: string, root: string) {
     "PATCH",
   );
   assert.match(await guest.page("/"), /Acceptance draft/);
+  if (largeZip) {
+    const largeOrder = await buyer.json<OrderView>(
+      "/api/orders",
+      {
+        productId: draft.id,
+        kind: "DRUMKIT",
+        revision: draft.revision,
+        requestKey: randomUUID(),
+        accepted: true,
+      },
+      201,
+    );
+    await buyer.json(`/api/orders/${largeOrder.id}`, {
+      action: "demo-success",
+    });
+    const download = await buyer.json<{ url: string }>(
+      `/api/orders/${largeOrder.id}/delivery`,
+      { action: "file" },
+    );
+    await verifyCapacityDownload(
+      await buyer.request(download.url, {
+        signal: AbortSignal.timeout(180000),
+      }),
+      largeZip,
+    );
+  }
   assert.equal(
     (await guest.request(`/media/${draft.files.PREVIEW!.id}`)).status,
     200,
@@ -498,11 +587,11 @@ async function checkShop(origin: string, root: string) {
   await admin.json(
     `/api/admin/products/${draft.id}`,
     { revision: draft.revision, confirmation: draft.title },
-    200,
+    capacity ? 409 : 200,
     "DELETE",
   );
   console.log(
-    "PASS: drumkit delivery, draft, cover/audio/ZIP uploads, publication and deletion",
+    "PASS: drumkit delivery, draft, cover/audio/ZIP uploads, publication and deletion rules",
   );
   await buyer.json("/api/auth/request-password-reset", {
     email: "demo@example.test",
@@ -547,6 +636,21 @@ async function checkShop(origin: string, root: string) {
   await buyer.json(`/api/orders/${order.id}`, undefined, 401);
   console.log(
     "PASS: password reset through local mail, one-time token, revoked sessions, sign-out",
+  );
+}
+async function startCapacityTraffic(origin: string) {
+  const client = new Client(origin);
+  await client.json("/api/auth/sign-in/email", {
+    email: "admin@example.test",
+    password: "Beatstore-admin-2026",
+  });
+  const product = await client.json<EditorProduct>(
+    "/api/admin/products/10000000-0000-4000-8000-000000000003",
+  );
+  return capacityTraffic(
+    origin,
+    `/media/${product.files.PREVIEW!.id}`,
+    `/media/${product.files.COVER!.id}`,
   );
 }
 function editorInput(product: EditorProduct) {

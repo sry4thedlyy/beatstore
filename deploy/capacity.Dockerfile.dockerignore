@@ -1,0 +1,26 @@
+# Only code, build and installed Linux dependencies enter the check container.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!next.config.ts
+!node_modules
+!node_modules/**
+!.next
+!.next/**
+!src
+!src/**
+!scripts
+!scripts/**
+!tests
+!tests/support
+!tests/support/acceptance-fixture.ts
+!migrations
+!migrations/**
+!assets
+!assets/fonts
+!assets/fonts/**
+!public
+!public/**
+.next/cache/**
+.next/dev/**
