@@ -1,10 +1,13 @@
 import { createAuth } from "../src/server/auth";
 import { readAuthConfig } from "../src/server/auth/config";
+import { isLoopback } from "../src/server/auth/mail-config";
 import { openDatabase } from "../src/server/db/connection";
 
+const config = readAuthConfig();
+if (!isLoopback(new URL(config.baseURL).hostname))
+  throw new Error("Known demo passwords are for local demonstration only.");
 const db = await openDatabase();
 try {
-  const config = readAuthConfig();
   const administrator = process.argv.includes("--admin");
   const email = administrator ? "admin@example.test" : "demo@example.test";
   const { rows } = await db.query<{ id: string }>(

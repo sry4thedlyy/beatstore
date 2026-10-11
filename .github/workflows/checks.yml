@@ -19,3 +19,32 @@ jobs:
       - run: npm run test:postgres
       - run: npm run build
       - run: npm run test:smoke
+  backup-recovery:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: isolated-backup-test-password
+          POSTGRES_DB: beatstore_backup_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:backup:postgres
+        env:
+          BACKUP_TEST_DATABASE_URL: postgresql://postgres:isolated-backup-test-password@127.0.0.1:5432/beatstore_backup_test
+          PG_DUMP_BIN: /usr/lib/postgresql/16/bin/pg_dump
+          PSQL_BIN: /usr/lib/postgresql/16/bin/psql
+      - name: Validate reverse proxy configuration
+        run: docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

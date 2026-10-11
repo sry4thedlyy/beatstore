@@ -1,3 +1,5 @@
+import { isLoopback, readMailConfig } from "./mail-config";
+
 export interface AuthConfig {
   secret: string;
   baseURL: string;
@@ -18,12 +20,15 @@ export function readAuthConfig(
     url.hash
   )
     throw new Error("BETTER_AUTH_URL must be an origin.");
-  // The file mailbox is only for a local demo. Public hosting needs a mail provider.
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("Invalid BETTER_AUTH_URL protocol.");
+  const mail = readMailConfig(env);
+  if (!isLoopback(url.hostname) && url.protocol !== "https:")
+    throw new Error("Public BETTER_AUTH_URL requires HTTPS.");
+  // File mail stays available locally, never as a fallback for public email.
+  if (!isLoopback(url.hostname) && mail.driver === "file")
     throw new Error(
       "The demo mailbox requires a loopback BETTER_AUTH_URL. Configure real email before public hosting.",
     );
-  if (!["http:", "https:"].includes(url.protocol))
-    throw new Error("Invalid BETTER_AUTH_URL protocol.");
   return { secret, baseURL: url.origin };
 }

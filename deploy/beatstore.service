@@ -1,0 +1,26 @@
+[Unit]
+Description=Beatstore demonstration shop
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=beatstore
+Group=beatstore
+WorkingDirectory=/opt/beatstore
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+EnvironmentFile=/opt/beatstore/.env.local
+ExecStart=/usr/bin/env node /opt/beatstore/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/beatstore/.data /opt/beatstore/.next
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

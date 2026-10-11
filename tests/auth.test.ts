@@ -470,3 +470,45 @@ test("HTTPS sessions use Secure cookies", async () => {
   assert.equal(response.status, 200, await response.clone().text());
   assert.match(response.headers.getSetCookie().join(";"), /; Secure/i);
 });
+
+test("password reset schedules delivery after the response and hides email delivery failure", async () => {
+  const result = await register("mail-failure@example.test");
+  const jobs: Array<() => Promise<void>> = [];
+  let deliveries = 0;
+  const queued = createAuth(
+    db,
+    config,
+    async () => {
+      deliveries++;
+      throw new Error("private-smtp-response");
+    },
+    (task) => jobs.push(task),
+  );
+  const reset = (email: string) =>
+    handleAuthRequest(
+      queued,
+      new Request(`${config.baseURL}/api/auth/request-password-reset`, {
+        method: "POST",
+        headers: { origin: config.baseURL, "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      }),
+    );
+  const known = await reset(result.user.email),
+    unknown = await reset("missing-smtp@example.test");
+  assert.equal(known.status, 200);
+  assert.deepEqual(await known.json(), await unknown.json());
+  assert.equal(deliveries, 0);
+  assert.equal(jobs.length, 1);
+  const original = console.error;
+  const logs: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
+    logs.push(args);
+  };
+  try {
+    await jobs[0]();
+  } finally {
+    console.error = original;
+  }
+  assert.equal(deliveries, 1);
+  assert.deepEqual(logs, [["Password reset email could not be delivered."]]);
+});

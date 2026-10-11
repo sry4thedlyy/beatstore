@@ -18,6 +18,8 @@ if (!env.BETTER_AUTH_SECRET)
   additions.push(`BETTER_AUTH_SECRET=${randomBytes(48).toString("base64url")}`);
 if (!env.BETTER_AUTH_URL)
   additions.push("BETTER_AUTH_URL=http://127.0.0.1:3000");
+if (!env.BACKUP_PASSPHRASE)
+  additions.push(`BACKUP_PASSPHRASE=${randomBytes(48).toString("base64url")}`);
 if (additions.length)
   await writeFile(
     ".env.local",
@@ -25,5 +27,5 @@ if (additions.length)
     { mode: 0o600 },
   );
 console.log(
-  "Local auth configuration is ready in .env.local. Secrets are not printed.",
+  "Auth and backup secrets are ready in .env.local. Existing values are preserved; secrets are not printed.",
 );

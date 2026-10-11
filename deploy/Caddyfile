@@ -1,0 +1,12 @@
+# Replace this hostname with a DNS name pointing at the demo VPS.
+demo.example.test {
+    request_body {
+        max_size 525MB
+    }
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Robots-Tag "noindex, nofollow"
+    }
+    reverse_proxy 127.0.0.1:3000
+}

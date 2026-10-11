@@ -70,6 +70,11 @@ async function run() {
       BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
       PAYMENT_PROVIDER: "demo",
       STORAGE_DRIVER: "local",
+      MAIL_DRIVER: "file",
+      SMTP_HOST: "",
+      SMTP_USER: "",
+      SMTP_PASSWORD: "",
+      SMTP_FROM: "",
       DATABASE_URL: "",
       YOOKASSA_SHOP_ID: "",
       YOOKASSA_SECRET_KEY: "",
@@ -504,7 +509,17 @@ async function checkShop(origin: string, root: string) {
     redirectTo: "/reset-password",
   });
   const { readdir } = await import("node:fs/promises");
-  const mailName = (await readdir(path.join(root, ".data/mail")))[0];
+  const mailbox = path.join(root, ".data/mail");
+  let mailName: string | undefined;
+  for (let attempt = 0; attempt < 100 && !mailName; attempt++) {
+    try {
+      mailName = (await readdir(mailbox))[0];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (!mailName) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert(mailName, "Password reset mail must arrive after the response");
   const mail = JSON.parse(
     await readFile(path.join(root, ".data/mail", mailName), "utf8"),
   ) as { url: string };
