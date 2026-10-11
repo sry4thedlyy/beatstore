@@ -121,9 +121,22 @@ export async function handlePaymentNotification(
   request: Request,
   provider = getPaymentProvider(db),
   baseURL = process.env.BETTER_AUTH_URL ?? "http://127.0.0.1:3000",
+  afterCheck?: (orderId: string) => Promise<void>,
 ) {
   try {
-    await processNotification(await body(request), db, provider, baseURL);
+    const id = await processNotification(
+      await body(request),
+      db,
+      provider,
+      baseURL,
+    );
+    if (id && afterCheck) {
+      try {
+        await afterCheck(id);
+      } catch {
+        console.error("Document preparation deferred");
+      }
+    }
     return json({ received: true });
   } catch (error) {
     return orderFailure(error);

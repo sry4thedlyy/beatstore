@@ -4,7 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { orderStatusNames, type OrderView } from "@/domain/checkout";
 import { formatPrice } from "@/domain/pricing";
-export function OrderPanel({ initial }: { initial: OrderView }) {
+import { DeliveryPanel } from "./delivery-panel";
+import type { DeliveryView } from "@/domain/delivery";
+export function OrderPanel({
+  initial,
+  delivery,
+}: {
+  initial: OrderView;
+  delivery: DeliveryView;
+}) {
   const [order, setOrder] = useState(initial),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -169,9 +177,16 @@ export function OrderPanel({ initial }: { initial: OrderView }) {
           <p>
             Тестовая оплата подтверждена. Покупка сохранена в личном кабинете.
           </p>
-          <p className="checkout-muted">
-            Выдача файлов и документов будет подключена на следующем этапе.
+          <DeliveryPanel orderId={order.id} delivery={delivery} />
+        </>
+      )}
+      {order.status === "REFUNDED" && (
+        <>
+          <p>
+            Платёж возвращён. Доступ к файлу закрыт; готовый документ
+            сохраняется как история покупки.
           </p>
+          <DeliveryPanel orderId={order.id} delivery={delivery} />
         </>
       )}
       {order.status === "CANCELLED" && (

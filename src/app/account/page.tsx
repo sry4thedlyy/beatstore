@@ -8,6 +8,8 @@ import { statusNames, STORAGE_LIMIT } from "@/domain/catalog-editor";
 import { getDatabase } from "@/server/db/connection";
 import { getUserOrders } from "@/server/checkout/service";
 import { OrderList } from "@/components/order-list";
+import { getAdminDocuments } from "@/server/delivery/service";
+import { DownloadButton } from "@/components/download-button";
 
 export const metadata = { title: "Личный кабинет" };
 export default async function AccountPage() {
@@ -18,6 +20,9 @@ export default async function AccountPage() {
     : await getAccountCounts(user);
   const catalog = admin ? await getAdminCatalog(user) : null;
   const orders = await getUserOrders(user, await getDatabase());
+  const documents = admin
+    ? await getAdminDocuments(user, await getDatabase())
+    : null;
   return (
     <div className="account-page">
       <Link href="/" className="back-link">
@@ -102,6 +107,35 @@ export default async function AccountPage() {
           )}
         </section>
       ) : null}
+      {documents && (
+        <section className="account-section">
+          <h2>Документы покупателей</h2>
+          {documents.length ? (
+            documents.map((d) => (
+              <div key={d.id} className="admin-document-row">
+                <div>
+                  <strong>{d.title}</strong>
+                  <p className="checkout-muted">
+                    {d.buyer} · №{d.id.slice(0, 8)}
+                  </p>
+                </div>
+                <DownloadButton
+                  url={`/api/orders/${d.id}/delivery`}
+                  body={{ action: "document" }}
+                  label={
+                    d.status === "READY" ? "Скачать PDF" : "Подготовить PDF"
+                  }
+                />
+              </div>
+            ))
+          ) : (
+            <p className="account-description">
+              Оплаченных лицензий пока нет. Покупки драмкитов не создают
+              документ.
+            </p>
+          )}
+        </section>
+      )}
       <OrderList
         orders={orders.filter(
           (o) => o.status === "PAID" || o.status === "REFUNDED",

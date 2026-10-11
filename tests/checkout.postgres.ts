@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -25,6 +25,14 @@ import {
   applyVerifiedPayment,
 } from "../src/server/checkout/service";
 import type { CurrentUser } from "../src/server/auth/session";
+import { ensureLicenseDocument } from "../src/server/documents/service";
+import { renderLicensePdf } from "../src/server/documents/pdf";
+import {
+  getFreeDownload,
+  issueFreeDownload,
+  resolveDownload,
+} from "../src/server/delivery/service";
+import { verifyDownload } from "../src/server/delivery/token";
 let db: Database,
   provider: PaymentProvider,
   root: string,
@@ -240,4 +248,82 @@ test("concurrent retries reuse one order and payment; late pending never regress
     db,
   );
   assert.equal((await getOrder(who, order.id, db)).status, "PAID");
+});
+
+test("concurrent document requests render and publish one immutable PDF", async () => {
+  const id = await beat(),
+    who = await user(),
+    body = await input(who, id, "WAV");
+  const o = await createOrder(who, body, db, provider, origin);
+  await simulateOrder(who, o.id, "succeeded", db, provider, origin);
+  let calls = 0;
+  const directory = path.join(root, "documents");
+  await Promise.all(
+    Array.from({ length: 6 }, () =>
+      ensureLicenseDocument(
+        o.id,
+        db,
+        {
+          directory,
+          render: (input) => {
+            calls++;
+            return renderLicensePdf(input);
+          },
+        },
+        true,
+      ),
+    ),
+  );
+  const { rows } = await db.query<{
+    status: string;
+    object_key: string;
+    size_bytes: string;
+  }>(
+    "SELECT d.status,f.object_key,f.size_bytes FROM documents d JOIN files f ON f.id=d.file_id WHERE d.order_id=$1",
+    [o.id],
+  );
+  assert.equal(calls, 1);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, "READY");
+  assert.equal(
+    (await readFile(path.join(directory, rows[0].object_key))).length,
+    Number(rows[0].size_bytes),
+  );
+  await assert.rejects(
+    db.query("UPDATE documents SET status='FAILED' WHERE order_id=$1", [o.id]),
+    /immutable/,
+  );
+});
+
+test("a free grant racing exclusive confirmation cannot download after the sale", async () => {
+  const id = await beat(),
+    who = await user(),
+    freeBuyer = await user(),
+    body = await input(who, id);
+  const o = await createOrder(who, body, db, provider, origin),
+    q = await getFreeDownload(freeBuyer, id, db),
+    secret = "A-separate-Postgres-download-secret-of-48-characters";
+  const [free, paid] = await Promise.allSettled([
+    issueFreeDownload(
+      freeBuyer,
+      id,
+      { revision: q.revision, termsId: q.termsId, accepted: true },
+      db,
+      secret,
+    ),
+    simulateOrder(who, o.id, "succeeded", db, provider, origin),
+  ]);
+  assert.equal(paid.status, "fulfilled");
+  if (free.status === "fulfilled") {
+    const token = new URL(free.value.url, origin).searchParams.get("token")!;
+    await assert.rejects(
+      resolveDownload(
+        freeBuyer,
+        verifyDownload(token, secret, freeBuyer.id),
+        db,
+      ),
+      /недоступно/,
+    );
+  }
+  await assert.rejects(getFreeDownload(freeBuyer, id, db), /недоступно/);
 });

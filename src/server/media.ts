@@ -31,12 +31,14 @@ export async function getPublicMedia(
 }
 
 export function localMediaPath(file: MediaFile): string {
-  if (!["local-demo", "local-upload"].includes(file.bucket))
+  if (!["local-demo", "local-upload", "local-document"].includes(file.bucket))
     throw new Error("Storage provider is not configured for this file");
   const root = path.resolve(
     /*turbopackIgnore: true*/ file.bucket === "local-demo"
       ? ".data/demo-assets"
-      : ".data/uploads",
+      : file.bucket === "local-document"
+        ? ".data/documents"
+        : ".data/uploads",
   );
   const filename = path.resolve(root, file.object_key);
   if (!filename.startsWith(root + path.sep))
@@ -66,15 +68,20 @@ export async function mediaResponse(
   file: MediaFile,
   head = false,
   privateMedia = false,
+  downloadName?: string,
+  pathForFile = localMediaPath,
 ): Promise<Response> {
   let filename: string;
   const size = Number(file.size_bytes);
   try {
-    filename = localMediaPath(file);
+    filename = pathForFile(file);
     if ((await stat(filename)).size !== size)
       throw new Error("Incomplete file");
   } catch {
-    return new Response(null, { status: 404 });
+    return new Response(null, {
+      status: 404,
+      headers: { "Cache-Control": "private, no-store" },
+    });
   }
   const headers = new Headers({
     "Content-Type": file.content_type,
@@ -83,9 +90,27 @@ export async function mediaResponse(
     "X-Content-Type-Options": "nosniff",
     ETag: `"${file.checksum}"`,
   });
+  if (downloadName) {
+    const rawName = downloadName.replaceAll("\\", "/").split("/").pop()!;
+    const name = Array.from(rawName)
+      .map((c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? "_" : c))
+      .join("");
+    const ascii =
+      name.replace(/[^a-zA-Z0-9_. -]/g, "_").slice(0, 180) || "download";
+    headers.set(
+      "Content-Disposition",
+      `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+    );
+    headers.set("Referrer-Policy", "no-referrer");
+    headers.set("Content-Security-Policy", "default-src 'none'; sandbox");
+  }
   if (request.headers.get("if-none-match") === headers.get("ETag"))
     return new Response(null, { status: 304, headers });
-  const rangeHeader = head ? null : request.headers.get("range");
+  const ifRange = request.headers.get("if-range");
+  const rangeHeader =
+    head || (ifRange && ifRange !== headers.get("ETag"))
+      ? null
+      : request.headers.get("range");
   const range = rangeHeader ? parseRange(rangeHeader, size) : null;
   if (rangeHeader && !range) {
     headers.set("Content-Range", `bytes */${size}`);

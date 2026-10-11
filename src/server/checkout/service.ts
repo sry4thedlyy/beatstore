@@ -467,6 +467,11 @@ export async function applyVerifiedPayment(
         `UPDATE orders SET status='PAID',paid_at=now() WHERE id=$1`,
         [order.id],
       );
+      if (order.purchase_kind !== "DRUMKIT")
+        await tx.query(
+          `INSERT INTO documents(order_id,template_version_id) VALUES($1,$2) ON CONFLICT(order_id) DO NOTHING`,
+          [order.id, order.snapshot.terms.id],
+        );
       if (isExclusive)
         await tx.query(
           `UPDATE products SET status='EXCLUSIVE_SOLD',exclusive_order_id=$2,reserved_order_id=NULL,reservation_expires_at=NULL,revision=revision+1,updated_at=now() WHERE id=$1`,
@@ -600,7 +605,7 @@ export async function processNotification(
   );
   if (!rows[0]) return; // Early notification is recovered by server-side polling after creation.
   if (rows[0].checked_at && Date.now() - rows[0].checked_at.getTime() < 3000)
-    return;
+    return rows[0].order_id;
   if (rows[0].status === "CANCELLED") {
     await applyVerifiedPayment(
       rows[0].order_id,
@@ -608,8 +613,9 @@ export async function processNotification(
       await provider.get(String(object.id)),
       db,
     );
-    return;
+    return rows[0].order_id;
   }
   // Notification payload never determines payment status; read authenticated API state.
   await reconcileOrder(rows[0].order_id, db, provider, baseURL);
+  return rows[0].order_id;
 }

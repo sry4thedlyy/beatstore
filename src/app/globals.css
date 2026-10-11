@@ -1763,3 +1763,51 @@ p {
     transition: none !important;
   }
 }
+.delivery-panel {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+.delivery-panel h3 {
+  margin: 1rem 0 0.6rem;
+}
+.download-control {
+  margin: 0.75rem 0;
+}
+.download-control button {
+  max-width: 100%;
+  white-space: normal;
+}
+.free-download-page {
+  max-width: 780px;
+}
+.terms-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.terms-checkbox input {
+  margin-top: 0.4rem;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.delivery-panel .checkout-muted {
+  overflow-wrap: anywhere;
+}
+.admin-document-row {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  .admin-document-row {
+    display: block;
+  }
+}

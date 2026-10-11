@@ -136,6 +136,14 @@ export default async function ProductPage({
                   платная лицензия. После продажи эксклюзива бесплатное
                   разрешение прекращается.
                 </p>
+                {(!status || status === "PUBLISHED") && (
+                  <Link
+                    className="secondary-button"
+                    href={`/products/${product.id}/free`}
+                  >
+                    Скачать бесплатный MP3
+                  </Link>
+                )}
               </section>
               <section className="info-panel">
                 <h2>Проект FL Studio</h2>

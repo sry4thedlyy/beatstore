@@ -6,6 +6,8 @@ import { getOrder } from "@/server/checkout/service";
 import { CheckoutError } from "@/domain/checkout";
 import { OrderPanel } from "@/components/order-panel";
 import { PurchaseConditions } from "@/components/purchase-conditions";
+import { ensureLicenseDocument } from "@/server/documents/service";
+import { getDeliveryView } from "@/server/delivery/service";
 export const metadata = { title: "Заказ" };
 export default async function OrderPage({
   params,
@@ -21,6 +23,15 @@ export default async function OrderPage({
     if (e instanceof CheckoutError && e.status === 404) notFound();
     throw e;
   }
+  const db = await getDatabase();
+  if (order.status === "PAID") {
+    try {
+      await ensureLicenseDocument(order.id, db);
+    } catch {
+      console.error("Document preparation deferred");
+    }
+  }
+  const delivery = await getDeliveryView(user, id, db);
   return (
     <div className="checkout-page">
       <Link className="back-link" href="/account">
@@ -30,7 +41,7 @@ export default async function OrderPage({
       <h1>{order.snapshot.product.title}</h1>
       <div className="checkout-layout">
         <PurchaseConditions snapshot={order.snapshot} />
-        <OrderPanel initial={order} />
+        <OrderPanel initial={order} delivery={delivery} />
       </div>
     </div>
   );

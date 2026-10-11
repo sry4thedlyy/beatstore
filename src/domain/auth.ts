@@ -35,6 +35,9 @@ export function safeReturnTo(value: unknown): string {
     }
     if (
       url.pathname === "/products/new" ||
+      /^\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/free$/i.test(
+        url.pathname,
+      ) ||
       /^\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i.test(
         url.pathname,
       )
